@@ -199,6 +199,10 @@ typedef NS_ENUM(NSInteger, AppsWindowAction) {
     AppsExpandTopTwo, AppsExpandBottomTwo, AppsExitFullscreen
 };
 
+typedef NS_ENUM(NSInteger, AppsLayoutMode) {
+    AppsLayoutCenter, AppsLayoutTwoColumns, AppsLayoutFour, AppsLayoutEight, AppsLayoutTwoPanorama
+};
+
 @interface AppsDelegate : NSObject <NSApplicationDelegate>
 @property NSStatusItem *statusItem;
 @property NSMenuItem *loginItem;
@@ -206,6 +210,7 @@ typedef NS_ENUM(NSInteger, AppsWindowAction) {
 @property AppsScreenRecorder *screenRecorder;
 @property dispatch_queue_t windowQueue;
 @property BOOL showingTopStacks;
+@property AppsLayoutMode currentLayout;
 @end
 
 @implementation AppsDelegate
@@ -219,6 +224,7 @@ typedef NS_ENUM(NSInteger, AppsWindowAction) {
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     self.windowQueue = dispatch_queue_create("ee.antero.apps.windows", DISPATCH_QUEUE_SERIAL);
     self.showingTopStacks = YES;
+    self.currentLayout = AppsLayoutCenter;
     self.statusItem = [NSStatusBar.systemStatusBar statusItemWithLength:NSVariableStatusItemLength];
     NSString *iconPath = [NSBundle.mainBundle pathForResource:@"apps" ofType:@"icns"];
     NSImage *menuIcon = [[NSImage alloc] initWithContentsOfFile:iconPath];
@@ -237,6 +243,7 @@ typedef NS_ENUM(NSInteger, AppsWindowAction) {
     [menu addItem:[self item:@"Верхние 2 стопки — развернуть вниз" action:@selector(expandTopTwo:) key:@"7"]];
     [menu addItem:[self item:@"Нижние 2 стопки — развернуть вверх" action:@selector(expandBottomTwo:) key:@"8"]];
     [menu addItem:[self item:@"Переключить верхние ↕ нижние стопки" action:@selector(toggleStackRows:) key:@"9"]];
+    [menu addItem:[self item:@"Активное окно → следующая стопка" action:@selector(moveActiveWindowToNextStack:) key:@"n"]];
     [menu addItem:NSMenuItem.separatorItem];
     [menu addItem:[self item:@"Свернуть в Dock" action:@selector(minimizeAll:) key:@"3"]];
     [menu addItem:[self item:@"Восстановить из Dock" action:@selector(restoreAll:) key:@"4"]];
@@ -512,8 +519,76 @@ typedef NS_ENUM(NSInteger, AppsWindowAction) {
     dispatch_async(self.windowQueue, ^{ [self perform:action]; });
 }
 
+- (void)showMessage:(NSString *)message {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSAlert *alert = [NSAlert new];
+        alert.messageText = @"apps";
+        alert.informativeText = message;
+        [alert runModal];
+    });
+}
+
+- (void)moveFocusedWindowToNextSlot:(AppsLayoutMode)layout {
+    NSUInteger columns = 1, rows = 1;
+    if (layout == AppsLayoutTwoColumns) columns = 2;
+    else if (layout == AppsLayoutFour) { columns = 2; rows = 2; }
+    else if (layout == AppsLayoutEight) { columns = 4; rows = 2; }
+    else if (layout == AppsLayoutTwoPanorama) rows = 2;
+    else { [self showMessage:@"В центральном режиме только одна стопка."]; return; }
+
+    AXUIElementRef system = AXUIElementCreateSystemWide();
+    CFTypeRef appValue = NULL;
+    CFTypeRef windowValue = NULL;
+    AXError appError = AXUIElementCopyAttributeValue(system, kAXFocusedApplicationAttribute, &appValue);
+    if (appError == kAXErrorSuccess && appValue) {
+        AXUIElementSetMessagingTimeout((AXUIElementRef)appValue, 0.75);
+        AXUIElementCopyAttributeValue((AXUIElementRef)appValue, kAXFocusedWindowAttribute, &windowValue);
+    }
+    CFRelease(system);
+    if (appValue) CFRelease(appValue);
+    if (!windowValue) { [self showMessage:@"Не удалось определить активное окно."]; return; }
+
+    AXUIElementRef window = (AXUIElementRef)windowValue;
+    NSScreen *screen = NSScreen.mainScreen;
+    NSRect visible = screen.visibleFrame;
+    CGFloat scale = MIN(NSWidth(visible) / 1792.0, NSHeight(visible) / 1095.0);
+    CGFloat spacing = MIN(18, MAX(8, round(12 * scale)));
+    CGFloat width = (NSWidth(visible) - spacing * (columns + 1)) / columns;
+    CGFloat height = (NSHeight(visible) - spacing * (rows + 1)) / rows;
+    CGFloat visibleTop = NSMaxY(screen.frame) - NSMaxY(visible);
+    CGPoint current = [self positionOfWindow:window];
+    NSUInteger count = columns * rows;
+    NSUInteger nearest = 0;
+    CGFloat nearestDistance = CGFLOAT_MAX;
+    for (NSUInteger index = 0; index < count; index++) {
+        NSUInteger column = index % columns;
+        NSUInteger row = index / columns;
+        CGPoint slot = CGPointMake(NSMinX(visible) + spacing + column * (width + spacing),
+                                   visibleTop + spacing + row * (height + spacing));
+        CGFloat distance = hypot(current.x - slot.x, current.y - slot.y);
+        if (distance < nearestDistance) { nearestDistance = distance; nearest = index; }
+    }
+    NSUInteger next = (nearest + 1) % count;
+    NSUInteger nextColumn = next % columns;
+    NSUInteger nextRow = next / columns;
+    CGPoint point = CGPointMake(NSMinX(visible) + spacing + nextColumn * (width + spacing),
+                                visibleTop + spacing + nextRow * (height + spacing));
+    [self setBoolean:NO attribute:CFSTR("AXFullScreen") window:window];
+    [self setBoolean:NO attribute:kAXMinimizedAttribute window:window];
+    [self setPosition:point size:CGSizeMake(width, height) window:window];
+    AXUIElementPerformAction(window, kAXRaiseAction);
+    CFRelease(windowValue);
+}
+
+- (void)moveActiveWindowToNextStack:(id)sender {
+    if (![self ensurePermission]) return;
+    AppsLayoutMode layout = self.currentLayout;
+    dispatch_async(self.windowQueue, ^{ [self moveFocusedWindowToNextSlot:layout]; });
+}
+
 - (void)maximizeAll:(id)sender { [self schedule:AppsMaximize]; }
 - (void)resizeAll:(id)sender {
+    self.currentLayout = AppsLayoutCenter;
     if (![self ensurePermission]) return;
     dispatch_async(self.windowQueue, ^{
         [self perform:AppsExitFullscreen];
@@ -523,6 +598,7 @@ typedef NS_ENUM(NSInteger, AppsWindowAction) {
     });
 }
 - (void)gridFourAll:(id)sender {
+    self.currentLayout = AppsLayoutFour;
     if (![self ensurePermission]) return;
     dispatch_async(self.windowQueue, ^{
         [self perform:AppsExitFullscreen];
@@ -532,6 +608,7 @@ typedef NS_ENUM(NSInteger, AppsWindowAction) {
     });
 }
 - (void)gridTwoAll:(id)sender {
+    self.currentLayout = AppsLayoutTwoColumns;
     if (![self ensurePermission]) return;
     dispatch_async(self.windowQueue, ^{
         [self perform:AppsExitFullscreen];
@@ -541,6 +618,7 @@ typedef NS_ENUM(NSInteger, AppsWindowAction) {
     });
 }
 - (void)gridEightAll:(id)sender {
+    self.currentLayout = AppsLayoutEight;
     if (![self ensurePermission]) return;
     dispatch_async(self.windowQueue, ^{
         [self perform:AppsExitFullscreen];
@@ -550,6 +628,7 @@ typedef NS_ENUM(NSInteger, AppsWindowAction) {
     });
 }
 - (void)gridTwoPanoramaAll:(id)sender {
+    self.currentLayout = AppsLayoutTwoPanorama;
     if (![self ensurePermission]) return;
     dispatch_async(self.windowQueue, ^{
         [self perform:AppsExitFullscreen];
@@ -559,10 +638,12 @@ typedef NS_ENUM(NSInteger, AppsWindowAction) {
     });
 }
 - (void)expandTopTwo:(id)sender {
+    self.currentLayout = AppsLayoutTwoColumns;
     self.showingTopStacks = YES;
     [self schedule:AppsExpandTopTwo];
 }
 - (void)expandBottomTwo:(id)sender {
+    self.currentLayout = AppsLayoutTwoColumns;
     self.showingTopStacks = NO;
     [self schedule:AppsExpandBottomTwo];
 }
