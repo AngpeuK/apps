@@ -359,7 +359,9 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
 }
 
 - (void)dimmingTimerFired:(NSTimer *)timer {
-    [self refreshDimming];
+    if (self.dimmingRequested && [self isDaylightTime]) {
+        [self setDimmingEnabled:NO];
+    }
 }
 
 - (void)screenParametersChanged:(NSNotification *)notification {
