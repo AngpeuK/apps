@@ -215,6 +215,7 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
 @property NSMutableArray<NSWindow *> *dimmingWindows;
 @property BOOL dimmingRequested;
 @property NSTimer *dimmingTimer;
+@property NSTask *watchdogTask;
 @end
 
 @implementation AppsDelegate
@@ -307,6 +308,28 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
                                                       selector:@selector(dimmingTimerFired:)
                                                       userInfo:nil
                                                        repeats:YES];
+    [self startWatchdog];
+}
+
+- (void)startWatchdog {
+    NSString *script = @"parent=\"$1\"; app=\"$2\"; "
+                        "while kill -0 \"$parent\" 2>/dev/null; do sleep 2; done; "
+                        "sleep 1; /usr/bin/open -n \"$app\"";
+    NSTask *task = [NSTask new];
+    task.executableURL = [NSURL fileURLWithPath:@"/bin/sh"];
+    task.arguments = @[@"-c", script, @"apps-watchdog",
+                       [NSString stringWithFormat:@"%d", NSProcessInfo.processInfo.processIdentifier],
+                       NSBundle.mainBundle.bundlePath];
+    NSFileHandle *nullHandle = [NSFileHandle fileHandleForWritingAtPath:@"/dev/null"];
+    task.standardOutput = nullHandle;
+    task.standardError = nullHandle;
+    NSError *error = nil;
+    if ([task launchAndReturnError:&error]) self.watchdogTask = task;
+}
+
+- (void)applicationWillTerminate:(NSNotification *)notification {
+    if (self.watchdogTask.running) [self.watchdogTask terminate];
+    self.watchdogTask = nil;
 }
 
 - (BOOL)isDaylightTime {
