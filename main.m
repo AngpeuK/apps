@@ -207,10 +207,12 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
 @property NSStatusItem *statusItem;
 @property NSMenuItem *loginItem;
 @property NSMenuItem *recordingItem;
+@property NSMenuItem *dimmingItem;
 @property AppsScreenRecorder *screenRecorder;
 @property dispatch_queue_t windowQueue;
 @property BOOL showingTopStacks;
 @property AppsLayoutMode currentLayout;
+@property NSMutableArray<NSWindow *> *dimmingWindows;
 @end
 
 @implementation AppsDelegate
@@ -225,6 +227,7 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
     self.windowQueue = dispatch_queue_create("ee.antero.apps.windows", DISPATCH_QUEUE_SERIAL);
     self.showingTopStacks = YES;
     self.currentLayout = AppsLayoutCenter;
+    self.dimmingWindows = [NSMutableArray array];
     self.statusItem = [NSStatusBar.systemStatusBar statusItemWithLength:NSVariableStatusItemLength];
     NSString *iconPath = [NSBundle.mainBundle pathForResource:@"apps" ofType:@"icns"];
     NSImage *menuIcon = [[NSImage alloc] initWithContentsOfFile:iconPath];
@@ -251,6 +254,8 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
     [menu addItem:NSMenuItem.separatorItem];
     self.recordingItem = [self item:@"Начать запись экрана" action:@selector(toggleScreenRecording:) key:@""];
     [menu addItem:self.recordingItem];
+    self.dimmingItem = [self item:@"Приглушить белый цвет" action:@selector(toggleDimming:) key:@"d"];
+    [menu addItem:self.dimmingItem];
     [menu addItem:NSMenuItem.separatorItem];
     self.loginItem = [self item:@"Запускать при входе" action:@selector(toggleLogin:) key:@""];
     [menu addItem:self.loginItem];
@@ -288,6 +293,50 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
 
     NSDictionary *options = @{(__bridge NSString *)kAXTrustedCheckOptionPrompt: @YES};
     AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
+
+    [NSNotificationCenter.defaultCenter addObserver:self
+                                           selector:@selector(screenParametersChanged:)
+                                               name:NSApplicationDidChangeScreenParametersNotification
+                                             object:nil];
+    if ([NSUserDefaults.standardUserDefaults boolForKey:@"WhiteDimmingEnabled"]) {
+        [self setDimmingEnabled:YES];
+    }
+}
+
+- (void)setDimmingEnabled:(BOOL)enabled {
+    for (NSWindow *window in self.dimmingWindows) [window close];
+    [self.dimmingWindows removeAllObjects];
+
+    if (enabled) {
+        for (NSScreen *screen in NSScreen.screens) {
+            NSWindow *overlay = [[NSWindow alloc] initWithContentRect:screen.frame
+                                                            styleMask:NSWindowStyleMaskBorderless
+                                                              backing:NSBackingStoreBuffered
+                                                                defer:NO
+                                                               screen:screen];
+            overlay.opaque = NO;
+            overlay.backgroundColor = [NSColor colorWithWhite:0.0 alpha:0.24];
+            overlay.ignoresMouseEvents = YES;
+            overlay.hasShadow = NO;
+            overlay.level = NSMainMenuWindowLevel - 1;
+            overlay.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
+                                         NSWindowCollectionBehaviorFullScreenAuxiliary |
+                                         NSWindowCollectionBehaviorStationary |
+                                         NSWindowCollectionBehaviorIgnoresCycle;
+            [overlay orderFrontRegardless];
+            [self.dimmingWindows addObject:overlay];
+        }
+    }
+    self.dimmingItem.state = enabled ? NSControlStateValueOn : NSControlStateValueOff;
+    [NSUserDefaults.standardUserDefaults setBool:enabled forKey:@"WhiteDimmingEnabled"];
+}
+
+- (void)toggleDimming:(id)sender {
+    [self setDimmingEnabled:self.dimmingWindows.count == 0];
+}
+
+- (void)screenParametersChanged:(NSNotification *)notification {
+    if (self.dimmingWindows.count > 0) [self setDimmingEnabled:YES];
 }
 
 - (BOOL)ensurePermission {
