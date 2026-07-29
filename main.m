@@ -213,6 +213,8 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
 @property BOOL showingTopStacks;
 @property AppsLayoutMode currentLayout;
 @property NSMutableArray<NSWindow *> *dimmingWindows;
+@property BOOL dimmingRequested;
+@property NSTimer *dimmingTimer;
 @end
 
 @implementation AppsDelegate
@@ -298,16 +300,27 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
                                            selector:@selector(screenParametersChanged:)
                                                name:NSApplicationDidChangeScreenParametersNotification
                                              object:nil];
-    if ([NSUserDefaults.standardUserDefaults boolForKey:@"WhiteDimmingEnabled"]) {
-        [self setDimmingEnabled:YES];
-    }
+    self.dimmingRequested = [NSUserDefaults.standardUserDefaults boolForKey:@"WhiteDimmingEnabled"];
+    [self refreshDimming];
+    self.dimmingTimer = [NSTimer scheduledTimerWithTimeInterval:60.0
+                                                        target:self
+                                                      selector:@selector(dimmingTimerFired:)
+                                                      userInfo:nil
+                                                       repeats:YES];
 }
 
-- (void)setDimmingEnabled:(BOOL)enabled {
+- (BOOL)isDaylightTime {
+    NSInteger hour = [NSCalendar.currentCalendar component:NSCalendarUnitHour fromDate:NSDate.date];
+    return hour >= 8 && hour < 20;
+}
+
+- (void)refreshDimming {
     for (NSWindow *window in self.dimmingWindows) [window close];
     [self.dimmingWindows removeAllObjects];
 
-    if (enabled) {
+    BOOL daylight = [self isDaylightTime];
+    BOOL active = self.dimmingRequested && !daylight;
+    if (active) {
         for (NSScreen *screen in NSScreen.screens) {
             NSWindow *overlay = [[NSWindow alloc] initWithContentRect:screen.frame
                                                             styleMask:NSWindowStyleMaskBorderless
@@ -327,16 +340,27 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
             [self.dimmingWindows addObject:overlay];
         }
     }
-    self.dimmingItem.state = enabled ? NSControlStateValueOn : NSControlStateValueOff;
+    self.dimmingItem.state = self.dimmingRequested ? NSControlStateValueOn : NSControlStateValueOff;
+    self.dimmingItem.title = self.dimmingRequested && daylight ?
+        @"Приглушение белого — днём отключено" : @"Приглушить белый цвет";
+}
+
+- (void)setDimmingEnabled:(BOOL)enabled {
+    self.dimmingRequested = enabled;
     [NSUserDefaults.standardUserDefaults setBool:enabled forKey:@"WhiteDimmingEnabled"];
+    [self refreshDimming];
 }
 
 - (void)toggleDimming:(id)sender {
-    [self setDimmingEnabled:self.dimmingWindows.count == 0];
+    [self setDimmingEnabled:!self.dimmingRequested];
+}
+
+- (void)dimmingTimerFired:(NSTimer *)timer {
+    [self refreshDimming];
 }
 
 - (void)screenParametersChanged:(NSNotification *)notification {
-    if (self.dimmingWindows.count > 0) [self setDimmingEnabled:YES];
+    [self refreshDimming];
 }
 
 - (BOOL)ensurePermission {
