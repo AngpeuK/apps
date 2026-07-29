@@ -319,7 +319,11 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
     [self.dimmingWindows removeAllObjects];
 
     BOOL daylight = [self isDaylightTime];
-    BOOL active = self.dimmingRequested && !daylight;
+    if (daylight && self.dimmingRequested) {
+        self.dimmingRequested = NO;
+        [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"WhiteDimmingEnabled"];
+    }
+    BOOL active = self.dimmingRequested;
     if (active) {
         for (NSScreen *screen in NSScreen.screens) {
             NSWindow *overlay = [[NSWindow alloc] initWithContentRect:screen.frame
@@ -341,8 +345,7 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
         }
     }
     self.dimmingItem.state = self.dimmingRequested ? NSControlStateValueOn : NSControlStateValueOff;
-    self.dimmingItem.title = self.dimmingRequested && daylight ?
-        @"Приглушение белого — днём отключено" : @"Приглушить белый цвет";
+    self.dimmingItem.title = @"Приглушить белый цвет";
 }
 
 - (void)setDimmingEnabled:(BOOL)enabled {
