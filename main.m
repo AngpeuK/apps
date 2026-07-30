@@ -216,6 +216,7 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
 @property BOOL dimmingRequested;
 @property NSTimer *dimmingTimer;
 @property NSTask *watchdogTask;
+@property NSString *watchdogStopPath;
 @end
 
 @implementation AppsDelegate
@@ -312,14 +313,20 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
 }
 
 - (void)startWatchdog {
-    NSString *script = @"parent=\"$1\"; app=\"$2\"; "
+    self.watchdogStopPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
+        [NSString stringWithFormat:@"ee.antero.apps.watchdog.%d.stop",
+         NSProcessInfo.processInfo.processIdentifier]];
+    [NSFileManager.defaultManager removeItemAtPath:self.watchdogStopPath error:nil];
+    NSString *script = @"parent=\"$1\"; app=\"$2\"; stop=\"$3\"; "
                         "while kill -0 \"$parent\" 2>/dev/null; do sleep 2; done; "
-                        "sleep 1; /usr/bin/open -n \"$app\"";
+                        "if [ ! -e \"$stop\" ]; then sleep 1; /usr/bin/open -n \"$app\"; fi; "
+                        "rm -f \"$stop\"";
     NSTask *task = [NSTask new];
     task.executableURL = [NSURL fileURLWithPath:@"/bin/sh"];
     task.arguments = @[@"-c", script, @"apps-watchdog",
                        [NSString stringWithFormat:@"%d", NSProcessInfo.processInfo.processIdentifier],
-                       NSBundle.mainBundle.bundlePath];
+                       NSBundle.mainBundle.bundlePath,
+                       self.watchdogStopPath];
     NSFileHandle *nullHandle = [NSFileHandle fileHandleForWritingAtPath:@"/dev/null"];
     task.standardOutput = nullHandle;
     task.standardError = nullHandle;
@@ -327,9 +334,17 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
     if ([task launchAndReturnError:&error]) self.watchdogTask = task;
 }
 
+- (void)stopWatchdogForNormalExit {
+    if (self.watchdogStopPath.length > 0) {
+        [@"stop" writeToFile:self.watchdogStopPath
+                   atomically:YES
+                     encoding:NSUTF8StringEncoding
+                        error:nil];
+    }
+}
+
 - (void)applicationWillTerminate:(NSNotification *)notification {
-    if (self.watchdogTask.running) [self.watchdogTask terminate];
-    self.watchdogTask = nil;
+    [self stopWatchdogForNormalExit];
 }
 
 - (BOOL)isDaylightTime {
@@ -778,7 +793,10 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
     [self updateLoginState];
 }
 
-- (void)quit:(id)sender { [NSApp terminate:nil]; }
+- (void)quit:(id)sender {
+    [self stopWatchdogForNormalExit];
+    [NSApp terminate:nil];
+}
 
 - (void)toggleScreenRecording:(id)sender {
     if (self.screenRecorder.recording) {
