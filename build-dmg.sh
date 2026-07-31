@@ -36,6 +36,10 @@ make_dmg() {
   mkdir -p "$source"
   cp -R "$STAGING/$label/apps.app" "$source/apps.app"
   ln -s /Applications "$source/Applications"
+  mkdir -p "$source/Скрипты"
+  cp "$ROOT/scripts/show-hidden-files.command" "$source/Скрипты/Показать скрытые файлы.command"
+  cp "$ROOT/scripts/hide-hidden-files.command" "$source/Скрипты/Скрыть скрытые файлы.command"
+  chmod +x "$source/Скрипты/"*.command
   hdiutil create -quiet -volname "apps $VERSION" -srcfolder "$source" \
     -ov -format UDZO "$OUTPUT/$filename"
 }

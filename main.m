@@ -261,6 +261,9 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
     self.dimmingItem = [self item:@"Приглушить белый цвет" action:@selector(toggleDimming:) key:@"d"];
     [menu addItem:self.dimmingItem];
     [menu addItem:NSMenuItem.separatorItem];
+    [menu addItem:[self item:@"Показать скрытые файлы" action:@selector(showHiddenFiles:) key:@""]];
+    [menu addItem:[self item:@"Скрыть скрытые файлы" action:@selector(hideHiddenFiles:) key:@""]];
+    [menu addItem:NSMenuItem.separatorItem];
     self.loginItem = [self item:@"Запускать при входе" action:@selector(toggleLogin:) key:@""];
     [menu addItem:self.loginItem];
     [menu addItem:[self item:@"Открыть настройки доступа…" action:@selector(openSettings:) key:@""]];
@@ -778,6 +781,33 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
     NSURL *url = [NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"];
     [NSWorkspace.sharedWorkspace openURL:url];
 }
+
+- (void)setHiddenFilesVisible:(BOOL)visible {
+    NSTask *defaultsTask = [NSTask new];
+    defaultsTask.executableURL = [NSURL fileURLWithPath:@"/usr/bin/defaults"];
+    defaultsTask.arguments = @[@"write", @"com.apple.finder", @"AppleShowAllFiles", @"-bool",
+                               visible ? @"true" : @"false"];
+    NSError *error = nil;
+    if (![defaultsTask launchAndReturnError:&error]) {
+        [[NSAlert alertWithError:error] runModal];
+        return;
+    }
+    [defaultsTask waitUntilExit];
+    if (defaultsTask.terminationStatus != 0) {
+        NSAlert *alert = [NSAlert new];
+        alert.messageText = @"Не удалось изменить отображение скрытых файлов";
+        [alert runModal];
+        return;
+    }
+
+    NSTask *finderTask = [NSTask new];
+    finderTask.executableURL = [NSURL fileURLWithPath:@"/usr/bin/killall"];
+    finderTask.arguments = @[@"Finder"];
+    [finderTask launchAndReturnError:nil];
+}
+
+- (void)showHiddenFiles:(id)sender { [self setHiddenFilesVisible:YES]; }
+- (void)hideHiddenFiles:(id)sender { [self setHiddenFilesVisible:NO]; }
 
 - (void)updateLoginState API_AVAILABLE(macos(13.0)) {
     self.loginItem.state = SMAppService.mainAppService.status == SMAppServiceStatusEnabled ? NSControlStateValueOn : NSControlStateValueOff;
