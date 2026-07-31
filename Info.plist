@@ -10,6 +10,17 @@
     <string>ee.antero.apps</string>
     <key>CFBundleIconFile</key>
     <string>apps</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>ee.antero.apps.commands</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>antero-apps</string>
+            </array>
+        </dict>
+    </array>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -17,9 +28,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>4.5</string>
+    <string>4.6</string>
     <key>CFBundleVersion</key>
-    <string>36</string>
+    <string>37</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>

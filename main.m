@@ -203,6 +203,21 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
     AppsLayoutCenter, AppsLayoutTwoColumns, AppsLayoutFour, AppsLayoutEight, AppsLayoutTwoPanorama
 };
 
+static NSDictionary *AppsSetFinderHiddenFiles(BOOL visible) {
+    NSString *source = @"tell application \"System Events\" to tell process \"Finder\" "
+                        "to key code 47 using {command down, shift down}";
+    NSAppleScript *script = [[NSAppleScript alloc] initWithSource:source];
+    NSDictionary *errorInfo = nil;
+    [script executeAndReturnError:&errorInfo];
+    if (!errorInfo) {
+        CFPreferencesSetAppValue(CFSTR("AppleShowAllFiles"),
+                                 visible ? kCFBooleanTrue : kCFBooleanFalse,
+                                 CFSTR("com.apple.finder"));
+        CFPreferencesAppSynchronize(CFSTR("com.apple.finder"));
+    }
+    return errorInfo;
+}
+
 @interface AppsDelegate : NSObject <NSApplicationDelegate>
 @property NSStatusItem *statusItem;
 @property NSMenuItem *loginItem;
@@ -217,7 +232,20 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
 @property NSTimer *dimmingTimer;
 @property NSTask *watchdogTask;
 @property NSString *watchdogStopPath;
+- (void)setHiddenFilesVisible:(BOOL)visible;
 @end
+
+static void AppsFinderCommandCallback(CFNotificationCenterRef center,
+                                      void *observer,
+                                      CFStringRef name,
+                                      const void *object,
+                                      CFDictionaryRef userInfo) {
+    AppsDelegate *delegate = (__bridge AppsDelegate *)observer;
+    BOOL visible = CFEqual(name, CFSTR("ee.antero.apps.show-hidden"));
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [delegate setHiddenFilesVisible:visible];
+    });
+}
 
 @implementation AppsDelegate
 
@@ -312,6 +340,18 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
                                                       selector:@selector(dimmingTimerFired:)
                                                       userInfo:nil
                                                        repeats:YES];
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+                                    (__bridge const void *)self,
+                                    AppsFinderCommandCallback,
+                                    CFSTR("ee.antero.apps.show-hidden"),
+                                    NULL,
+                                    CFNotificationSuspensionBehaviorDeliverImmediately);
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+                                    (__bridge const void *)self,
+                                    AppsFinderCommandCallback,
+                                    CFSTR("ee.antero.apps.hide-hidden"),
+                                    NULL,
+                                    CFNotificationSuspensionBehaviorDeliverImmediately);
     [self startWatchdog];
 }
 
@@ -348,6 +388,10 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
     [self stopWatchdogForNormalExit];
+    CFNotificationCenterRemoveObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+                                       (__bridge const void *)self,
+                                       NULL,
+                                       NULL);
 }
 
 - (BOOL)isDaylightTime {
@@ -783,31 +827,44 @@ typedef NS_ENUM(NSInteger, AppsLayoutMode) {
 }
 
 - (void)setHiddenFilesVisible:(BOOL)visible {
-    NSTask *defaultsTask = [NSTask new];
-    defaultsTask.executableURL = [NSURL fileURLWithPath:@"/usr/bin/defaults"];
-    defaultsTask.arguments = @[@"write", @"com.apple.finder", @"AppleShowAllFiles", @"-bool",
-                               visible ? @"true" : @"false"];
-    NSError *error = nil;
-    if (![defaultsTask launchAndReturnError:&error]) {
-        [[NSAlert alertWithError:error] runModal];
-        return;
-    }
-    [defaultsTask waitUntilExit];
-    if (defaultsTask.terminationStatus != 0) {
+    CFPropertyListRef value = CFPreferencesCopyAppValue(CFSTR("AppleShowAllFiles"),
+                                                        CFSTR("com.apple.finder"));
+    BOOL currentlyVisible = value && CFGetTypeID(value) == CFBooleanGetTypeID() &&
+                            CFBooleanGetValue((CFBooleanRef)value);
+    if (value) CFRelease(value);
+    if (currentlyVisible == visible) return;
+
+    NSRunningApplication *finder =
+        [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.apple.finder"].firstObject;
+    if (!finder) {
         NSAlert *alert = [NSAlert new];
-        alert.messageText = @"Не удалось изменить отображение скрытых файлов";
+        alert.messageText = @"Finder не запущен";
         [alert runModal];
         return;
     }
 
-    NSTask *finderTask = [NSTask new];
-    finderTask.executableURL = [NSURL fileURLWithPath:@"/usr/bin/killall"];
-    finderTask.arguments = @[@"Finder"];
-    [finderTask launchAndReturnError:nil];
+    NSDictionary *errorInfo = AppsSetFinderHiddenFiles(visible);
+    if (errorInfo) {
+        NSAlert *alert = [NSAlert new];
+        alert.messageText = @"Не удалось переключить скрытые файлы";
+        alert.informativeText = errorInfo[NSAppleScriptErrorMessage] ?: @"Проверьте доступ apps в Универсальном доступе.";
+        [alert runModal];
+    }
 }
 
 - (void)showHiddenFiles:(id)sender { [self setHiddenFilesVisible:YES]; }
 - (void)hideHiddenFiles:(id)sender { [self setHiddenFilesVisible:NO]; }
+
+- (void)application:(NSApplication *)application openURLs:(NSArray<NSURL *> *)urls {
+    for (NSURL *url in urls) {
+        if (![url.scheme.lowercaseString isEqualToString:@"antero-apps"]) continue;
+        if ([url.host.lowercaseString isEqualToString:@"show-hidden"]) {
+            [self setHiddenFilesVisible:YES];
+        } else if ([url.host.lowercaseString isEqualToString:@"hide-hidden"]) {
+            [self setHiddenFilesVisible:NO];
+        }
+    }
+}
 
 - (void)updateLoginState API_AVAILABLE(macos(13.0)) {
     self.loginItem.state = SMAppService.mainAppService.status == SMAppServiceStatusEnabled ? NSControlStateValueOn : NSControlStateValueOff;

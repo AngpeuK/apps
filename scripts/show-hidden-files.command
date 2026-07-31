@@ -1,7 +1,8 @@
 #!/bin/zsh
 set -e
 
-/usr/bin/defaults write com.apple.finder AppleShowAllFiles -bool true
-/usr/bin/killall Finder
+/usr/bin/open -g -b ee.antero.apps
+/bin/sleep 1
+/usr/bin/notifyutil -p ee.antero.apps.show-hidden
 
-echo "Скрытые файлы теперь отображаются."
+echo "Скрытые файлы отображаются без перезапуска Finder."
