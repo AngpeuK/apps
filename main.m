@@ -551,6 +551,17 @@ static void AppsFinderCommandCallback(CFNotificationCenterRef center,
 
 - (void)perform:(AppsWindowAction)action {
     NSArray *windows = [self windowsIncludingHidden:action == AppsRestore];
+    if (action == AppsGridTwo) {
+        windows = [windows sortedArrayUsingComparator:^NSComparisonResult(id firstObject, id secondObject) {
+            CGPoint first = [self positionOfWindow:(__bridge AXUIElementRef)firstObject];
+            CGPoint second = [self positionOfWindow:(__bridge AXUIElementRef)secondObject];
+            if (first.x < second.x) return NSOrderedAscending;
+            if (first.x > second.x) return NSOrderedDescending;
+            if (first.y < second.y) return NSOrderedAscending;
+            if (first.y > second.y) return NSOrderedDescending;
+            return NSOrderedSame;
+        }];
+    }
     NSScreen *screen = NSScreen.mainScreen;
     NSRect visible = screen.visibleFrame;
     NSMutableArray *gridWindowsToRaise = [NSMutableArray array];
@@ -595,7 +606,8 @@ static void AppsFinderCommandCallback(CFNotificationCenterRef center,
             CGFloat spacing = MIN(18, MAX(8, round(12 * layoutScale)));
             CGFloat width = (NSWidth(visible) - spacing * 3) / 2;
             CGFloat height = NSHeight(visible) - spacing * 2;
-            NSUInteger column = index % 2;
+            NSUInteger leftStackCount = (windows.count + 1) / 2;
+            NSUInteger column = index < leftStackCount ? 0 : 1;
             CGFloat x = NSMinX(visible) + spacing + column * (width + spacing);
             CGFloat visibleTop = NSMaxY(screen.frame) - NSMaxY(visible);
             CGFloat y = visibleTop + spacing;
