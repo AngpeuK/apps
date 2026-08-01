@@ -289,8 +289,16 @@ static void AppsFinderCommandCallback(CFNotificationCenterRef center,
     self.dimmingItem = [self item:@"Приглушить белый цвет" action:@selector(toggleDimming:) key:@"d"];
     [menu addItem:self.dimmingItem];
     [menu addItem:NSMenuItem.separatorItem];
-    [menu addItem:[self item:@"Показать скрытые файлы" action:@selector(showHiddenFiles:) key:@""]];
-    [menu addItem:[self item:@"Скрыть скрытые файлы" action:@selector(hideHiddenFiles:) key:@""]];
+    NSMenuItem *showHiddenItem = [self item:@"Показать скрытые файлы"
+                                         action:@selector(showHiddenFiles:)
+                                            key:@"."];
+    showHiddenItem.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
+    [menu addItem:showHiddenItem];
+    NSMenuItem *hideHiddenItem = [self item:@"Скрыть скрытые файлы"
+                                         action:@selector(hideHiddenFiles:)
+                                            key:@"."];
+    hideHiddenItem.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
+    [menu addItem:hideHiddenItem];
     [menu addItem:NSMenuItem.separatorItem];
     self.loginItem = [self item:@"Запускать при входе" action:@selector(toggleLogin:) key:@""];
     [menu addItem:self.loginItem];
